@@ -28,6 +28,8 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 
+import java.util.Arrays;
+
 /**
  * The block entity behind a live map projector. Server-side it periodically scans the terrain around
  * itself into a compact {@link LiveMapData} (surface height + block id per column) and syncs it to
@@ -45,6 +47,13 @@ public class LiveMapBlockEntity extends BlockEntity {
     private int signal; // current redstone radar output (0-15), transient/recomputed
     private long ticks;
     private final int phase;
+
+    // Scratch buffers reused across scans. The volumetric voxel array is ~67 MB at radius 128, and
+    // re-allocating it on every scan (most of which find the terrain unchanged) was the dominant GC
+    // pressure source. We scan into these, compare against the live snapshot, and only allocate a new
+    // LiveMapData when something actually changed.
+    private int[] scratchHeights = new int[0];
+    private int[] scratchVoxels = new int[0];
 
     public LiveMapBlockEntity(BlockPos pos, BlockState state) {
         super(Mapminecraft.LIVE_MAP_BE.get(), pos, state);
@@ -153,8 +162,8 @@ public class LiveMapBlockEntity extends BlockEntity {
         }
 
         LiveMapData scanned = scan(server);
-        if (scanned.equals(data)) {
-            return; // terrain unchanged → no re-sync
+        if (scanned == data) {
+            return; // terrain unchanged → scan() handed back the same snapshot, nothing to re-sync
         }
         data = scanned;
         setChanged();
@@ -171,8 +180,21 @@ public class LiveMapBlockEntity extends BlockEntity {
     private LiveMapData scan(ServerLevel level) {
         int radius = settings.radius();
         int size = radius * 2;
-        int[] heights = new int[size * size];
-        int[] voxels = new int[size * size * BAND];
+        int cells = size * size;
+        int volume = cells * BAND;
+        // Reuse the scratch buffers; only (re)allocate when the radius changed. The voxel buffer must
+        // be cleared each scan because we only write non-air voxels (and skip whole air sections), so
+        // stale ids would otherwise linger. heights is fully overwritten per column below.
+        if (scratchHeights.length != cells) {
+            scratchHeights = new int[cells];
+        }
+        if (scratchVoxels.length != volume) {
+            scratchVoxels = new int[volume];
+        } else {
+            Arrays.fill(scratchVoxels, 0);
+        }
+        int[] heights = scratchHeights;
+        int[] voxels = scratchVoxels;
         // Scan around the custom target when set, otherwise around the projector itself.
         int centerX = settings.useTarget() ? settings.targetX() : worldPosition.getX();
         int centerZ = settings.useTarget() ? settings.targetZ() : worldPosition.getZ();
@@ -225,7 +247,20 @@ public class LiveMapBlockEntity extends BlockEntity {
                 }
             }
         }
-        return new LiveMapData(size, size, BAND, FLOOR, heights, voxels);
+
+        // Change detection: if the freshly scanned content matches the live snapshot, hand back the
+        // SAME object so callers skip the re-sync AND we avoid cloning ~67 MB for nothing. The
+        // comparison cost is the same as the old scanned.equals(data); what we save is the allocation.
+        if (!data.isEmpty()
+                && data.width() == size && data.height() == size
+                && data.band() == BAND && data.floor() == FLOOR
+                && Arrays.equals(data.heights(), heights)
+                && Arrays.equals(data.voxels(), voxels)) {
+            return data;
+        }
+        // Terrain changed: hand off independent copies — the snapshot is shared with the renderer and
+        // streamed to clients, so it must not alias the reusable scratch buffers.
+        return new LiveMapData(size, size, BAND, FLOOR, heights.clone(), voxels.clone());
     }
 
     // NOTE: the voxel snapshot is intentionally NOT persisted or written to the update tag. It is

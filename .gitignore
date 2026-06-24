@@ -19,3 +19,6 @@ hs_err_pid*
 
 # Common working directory
 run
+
+# Runtime logs produced by the dev client/server
+*.log

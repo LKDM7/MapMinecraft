@@ -318,16 +318,60 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
                 new float[quads * 8], new int[quads * 4], quads);
     }
 
+    // Per block-state-id classification, cached so the hot mesh loops don't re-resolve the block
+    // state + fluid state ~12x per voxel (each neighbour occlusion test) across millions of voxels per
+    // rebuild — that lookup was the dominant bake cost at large radius. The block registry is fixed
+    // after load, so the mapping is stable for the whole session; the cache is render-thread only.
+    private static final byte CLASS_UNKNOWN = -1;
+    private static final byte CLASS_AIR = 0;
+    private static final byte CLASS_OPAQUE = 1;
+    private static final byte CLASS_WATER = 2;
+    private static final byte CLASS_LEAF = 3;
+    private static byte[] classCache;
+
+    private static byte classOf(int id) {
+        byte[] c = classCache;
+        if (c == null || id >= c.length) {
+            int len = Math.max(id + 1, Block.BLOCK_STATE_REGISTRY.size());
+            byte[] grown = new byte[len];
+            java.util.Arrays.fill(grown, CLASS_UNKNOWN);
+            if (c != null) {
+                System.arraycopy(c, 0, grown, 0, c.length);
+            }
+            classCache = c = grown;
+        }
+        byte v = c[id];
+        if (v == CLASS_UNKNOWN) {
+            v = computeClass(id);
+            c[id] = v;
+        }
+        return v;
+    }
+
+    private static byte computeClass(int id) {
+        if (id == 0) {
+            return CLASS_AIR;
+        }
+        BlockState state = Block.stateById(id);
+        if (state.isAir()) {
+            return CLASS_AIR;
+        }
+        var fluid = state.getFluidState();
+        if (!fluid.isEmpty() && fluid.is(FluidTags.WATER)) {
+            return CLASS_WATER;
+        }
+        if (state.getBlock() instanceof LeavesBlock) {
+            return CLASS_LEAF;
+        }
+        return CLASS_OPAQUE;
+    }
+
     private static boolean isLeaf(int blockId) {
-        return Block.stateById(blockId).getBlock() instanceof LeavesBlock;
+        return classOf(blockId) == CLASS_LEAF;
     }
 
     private static boolean isWaterId(int blockId) {
-        if (blockId == 0) {
-            return false;
-        }
-        var fluid = Block.stateById(blockId).getFluidState();
-        return !fluid.isEmpty() && fluid.is(FluidTags.WATER);
+        return classOf(blockId) == CLASS_WATER;
     }
 
     /** Block id of the voxel at footprint cell (dx,dz) and world Y {@code wy}; 0 (air) if out of range. */
@@ -352,8 +396,8 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
     /** A neighbour occludes opaque faces only if it is itself opaque — water never hides terrain. */
     private static boolean opaqueAt(int size, int band, int floor, int[] heights, int[] voxels,
                                     int dx, int dz, int wy) {
-        int id = voxelAt(size, band, floor, heights, voxels, dx, dz, wy);
-        return id != 0 && !isWaterId(id);
+        byte cl = classOf(voxelAt(size, band, floor, heights, voxels, dx, dz, wy));
+        return cl == CLASS_OPAQUE || cl == CLASS_LEAF;
     }
 
     /**
