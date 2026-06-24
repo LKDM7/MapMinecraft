@@ -22,3 +22,6 @@ run
 
 # Runtime logs produced by the dev client/server
 *.log
+
+# Local-only promo/showcase copy (not the repo's README)
+SHOWCASE.md
