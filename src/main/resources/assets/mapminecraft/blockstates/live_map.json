@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "mapminecraft:block/live_map" }
+  }
+}

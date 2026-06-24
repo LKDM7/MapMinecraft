@@ -1,0 +1,18 @@
+  {
+  "type": "minecraft:crafting_shaped",
+  "category": "tools",
+  "pattern": [
+    "PRP",
+    "RCR",
+    "PRP"
+  ],
+  "key": {
+    "P": { "item": "minecraft:paper" },
+    "R": { "item": "minecraft:redstone" },
+    "C": { "item": "minecraft:compass" }
+  },
+  "result": {
+    "id": "mapminecraft:live_map",
+    "count": 1
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "itemGroup.mapminecraft": "MapMinecraft",
+  "block.mapminecraft.live_map": "Live Map Projector",
+  "screen.mapminecraft.live_map": "Live Map Projector",
+  "screen.mapminecraft.radius": "Scan radius",
+  "screen.mapminecraft.interval": "Scan interval (ticks)",
+  "screen.mapminecraft.scale": "Hologram size",
+  "screen.mapminecraft.hover": "Hover height",
+  "screen.mapminecraft.rotspeed": "Rotation speed",
+  "screen.mapminecraft.bob": "Float bob",
+  "screen.mapminecraft.rotate": "Rotate",
+  "screen.mapminecraft.redstone": "Redstone",
+  "screen.mapminecraft.detect": "Detect",
+  "screen.mapminecraft.detect.all": "All",
+  "screen.mapminecraft.detect.players": "Players",
+  "screen.mapminecraft.detect.hostiles": "Hostiles",
+  "screen.mapminecraft.detect.animals": "Animals",
+  "screen.mapminecraft.detect.items": "Items",
+  "screen.mapminecraft.target": "Center on coords",
+  "screen.mapminecraft.show": "Hologram"
+}
