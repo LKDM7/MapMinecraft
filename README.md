@@ -61,6 +61,10 @@ To run a dev client or server:
 ./gradlew runServer
 ```
 
+## Author
+
+Made by @lkdm.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
@@ -125,6 +129,10 @@ Pour lancer un client ou serveur de développement :
 ./gradlew runClient
 ./gradlew runServer
 ```
+
+### Auteur
+
+Réalisé par @lkdm.
 
 ### Licence
 

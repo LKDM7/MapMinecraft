@@ -31,6 +31,12 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.slf4j.Logger;
 
+/**
+ * Main entry point for the MapMinecraft mod: registers the live map projector block, its block
+ * entity, item, creative tab and networking.
+ *
+ * @author @lkdm
+ */
 // The value here should match an entry in the META-INF/neoforge.mods.toml file
 @Mod(Mapminecraft.MODID)
 public class Mapminecraft {
