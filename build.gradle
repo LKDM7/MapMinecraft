@@ -3,7 +3,10 @@ plugins {
     id 'maven-publish'
     id 'idea'
     id 'net.neoforged.moddev' version '2.0.141'
+    id 'net.darkhax.curseforgegradle' version '1.1.25'
 }
+
+import net.darkhax.curseforgegradle.TaskPublishCurseForge
 
 version = mod_version
 group = mod_group_id
@@ -143,6 +146,53 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 sourceSets.main.resources.srcDir generateModMetadata
 // To avoid having to run "generateModMetadata" manually, make it run on every project reload
 neoForge.ideSyncTask generateModMetadata
+
+// Pull the changelog section for the current version out of CHANGELOG.md.
+// Falls back to a generic line if the file or section is missing.
+def releaseChangelog() {
+    def file = rootProject.file('CHANGELOG.md')
+    if (!file.exists()) {
+        return "Release ${mod_version}"
+    }
+    def text = file.getText('UTF-8')
+    def marker = "## [${mod_version}]"
+    def start = text.indexOf(marker)
+    if (start < 0) {
+        return "Release ${mod_version}"
+    }
+    def body = text.substring(start + marker.length())
+    def next = body.indexOf('\n## [')
+    if (next >= 0) {
+        body = body.substring(0, next)
+    }
+    // Drop the leading " - YYYY-MM-DD" date tail on the header line.
+    return body.replaceFirst(/^[^\n]*\n/, '').trim()
+}
+
+// Publish the built jar to CurseForge. Run: ./gradlew publishCurseForge
+// Requires CURSEFORGE_TOKEN in the environment and curseforge_project_id in gradle.properties.
+tasks.register('publishCurseForge', TaskPublishCurseForge) {
+    group = 'publishing'
+    description = 'Builds and uploads the mod jar to CurseForge'
+    dependsOn 'build'
+    apiToken = providers.environmentVariable('CURSEFORGE_TOKEN').getOrElse('')
+
+    def projectId = project.findProperty('curseforge_project_id')
+    if (projectId ==~ /\d+/) {
+        def mainFile = upload(projectId, tasks.named('jar'))
+        mainFile.releaseType = 'release'
+        mainFile.changelogType = 'markdown'
+        mainFile.changelog = releaseChangelog()
+        mainFile.addGameVersion(minecraft_version)
+        mainFile.addModLoader('NeoForge')
+        mainFile.addJavaVersion('Java 21')
+        mainFile.displayName = "${mod_name} ${mod_version}"
+    } else {
+        doFirst {
+            throw new GradleException('Set a numeric curseforge_project_id in gradle.properties before publishing to CurseForge.')
+        }
+    }
+}
 
 // Example configuration to allow publishing using the maven-publish plugin
 publishing {
