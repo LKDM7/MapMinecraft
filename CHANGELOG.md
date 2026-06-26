@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Nothing yet.
+- Per-player preset slots in the projector settings panel: three slots that save and re-apply
+  your favourite settings (click to load, Shift+click to save). Stored client-side.
+- Live Map Linker tool: bind several projectors to a master so their scans combine into one
+  larger composite hologram, without paying the quadratic cost of a single huge scan radius.
+  Right-click a projector to pick the master, right-click others to link them, sneak+right-click
+  to clear. Tip: turn the slaves' own holograms off so only the master shows the combined map.
 
 ## [1.0.1] - 2026-06-26
 

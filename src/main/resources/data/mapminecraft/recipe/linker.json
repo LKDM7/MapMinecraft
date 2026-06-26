@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "tools",
+  "pattern": [
+    " E ",
+    "RCR",
+    " R "
+  ],
+  "key": {
+    "E": { "item": "minecraft:ender_pearl" },
+    "R": { "item": "minecraft:redstone" },
+    "C": { "item": "minecraft:compass" }
+  },
+  "result": {
+    "id": "mapminecraft:linker",
+    "count": 1
+  }
+}

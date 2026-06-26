@@ -4,11 +4,15 @@ import com.mojang.logging.LogUtils;
 import neoforge.mapminecraft.block.LiveMapBlock;
 import neoforge.mapminecraft.block.LiveMapBlockEntity;
 import neoforge.mapminecraft.client.LiveMapBlockEntityRenderer;
+import neoforge.mapminecraft.item.LiveMapLinkerItem;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.material.MapColor;
@@ -47,12 +51,24 @@ public class Mapminecraft {
     public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MODID);
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
     public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITIES = DeferredRegister.create(Registries.BLOCK_ENTITY_TYPE, MODID);
+    public static final DeferredRegister<DataComponentType<?>> DATA_COMPONENTS = DeferredRegister.create(Registries.DATA_COMPONENT_TYPE, MODID);
+
+    // Stores the projector the linker tool currently has selected as a composite master.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<GlobalPos>> LINK_TARGET =
+            DATA_COMPONENTS.register("link_target", () -> DataComponentType.<GlobalPos>builder()
+                    .persistent(GlobalPos.CODEC)
+                    .networkSynchronized(GlobalPos.STREAM_CODEC)
+                    .build());
 
     // The live map projector block: place it and it projects a floating 3D hologram of the terrain.
     public static final DeferredBlock<LiveMapBlock> LIVE_MAP_BLOCK = BLOCKS.registerBlock("live_map",
             LiveMapBlock::new,
             BlockBehaviour.Properties.of().mapColor(MapColor.METAL).strength(1.5F).lightLevel(state -> 7).noOcclusion());
     public static final DeferredItem<BlockItem> LIVE_MAP_ITEM = ITEMS.registerSimpleBlockItem("live_map", LIVE_MAP_BLOCK);
+
+    // The linker tool: binds several projectors into one master's combined hologram.
+    public static final DeferredItem<LiveMapLinkerItem> LINKER_ITEM =
+            ITEMS.register("linker", () -> new LiveMapLinkerItem(new Item.Properties().stacksTo(1)));
 
     // The block entity that scans the terrain around the projector and syncs it to clients.
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<LiveMapBlockEntity>> LIVE_MAP_BE =
@@ -64,7 +80,10 @@ public class Mapminecraft {
                     .title(Component.translatable("itemGroup.mapminecraft"))
                     .withTabsBefore(CreativeModeTabs.SPAWN_EGGS)
                     .icon(() -> LIVE_MAP_ITEM.get().getDefaultInstance())
-                    .displayItems((parameters, output) -> output.accept(LIVE_MAP_ITEM.get()))
+                    .displayItems((parameters, output) -> {
+                        output.accept(LIVE_MAP_ITEM.get());
+                        output.accept(LINKER_ITEM.get());
+                    })
                     .build());
 
     public Mapminecraft(IEventBus modEventBus, ModContainer modContainer) {
@@ -72,6 +91,7 @@ public class Mapminecraft {
         ITEMS.register(modEventBus);
         CREATIVE_MODE_TABS.register(modEventBus);
         BLOCK_ENTITIES.register(modEventBus);
+        DATA_COMPONENTS.register(modEventBus);
 
         // Networking: the projector GUI sends setting changes to the server.
         modEventBus.addListener(this::registerPayloads);

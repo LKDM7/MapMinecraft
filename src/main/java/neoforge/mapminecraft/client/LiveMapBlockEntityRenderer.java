@@ -40,6 +40,7 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.joml.Matrix4f;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -103,12 +104,12 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
     private static final Map<Long, Long> REVEAL = new HashMap<>();
     private static final Set<Long> ACTIVE_HUMS = new HashSet<>();
 
-    // Cache the uploaded GPU mesh per (snapshot, position). Evicted entries free their VertexBuffer.
+    // Cache the uploaded GPU mesh per (snapshot set, master position). Evicted entries free their VertexBuffer.
     private static final int CACHE_MAX = 32;
-    private static final Map<MeshKey, GpuMesh> CACHE =
+    private static final Map<CompositeKey, GpuMesh> CACHE =
             new LinkedHashMap<>(16, 0.75F, true) {
                 @Override
-                protected boolean removeEldestEntry(Map.Entry<MeshKey, GpuMesh> eldest) {
+                protected boolean removeEldestEntry(Map.Entry<CompositeKey, GpuMesh> eldest) {
                     if (size() > CACHE_MAX) {
                         eldest.getValue().close();
                         return true;
@@ -142,18 +143,23 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
             return;
         }
 
-        LiveMapData data = be.getData();
-        if (data.isEmpty() || be.getLevel() == null) {
+        if (be.getLevel() == null) {
             return;
         }
 
         // Effective scan centre (custom target or the projector) so biome tint is sampled at the
         // mapped location, not the block. The hologram still renders above the projector itself.
         BlockPos center = be.getScanCenter();
-        MeshKey key = new MeshKey(data, center.asLong());
+        // A standalone projector renders just its own scan; a master also folds in every linked
+        // projector's scan, stitched together in world coordinates into one larger diorama.
+        List<Grid> grids = gatherGrids(be, center);
+        if (grids.isEmpty()) {
+            return; // nothing scanned yet (here or on any linked projector)
+        }
+        CompositeKey key = new CompositeKey(grids, center.asLong());
         GpuMesh mesh = CACHE.get(key);
         if (mesh == null) {
-            mesh = buildGpu(bake(data, be.getLevel(), center));
+            mesh = buildGpu(bake(grids, be.getLevel(), center));
             CACHE.put(key, mesh);
         }
         if (mesh.buffer == null && mesh.water == null) {
@@ -278,15 +284,77 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
 
     // ----- baking -------------------------------------------------------------------------------
 
-    private static BakedScene bake(LiveMapData data, BlockAndTintGetter level, BlockPos center) {
+    /**
+     * Collect the grids that feed this projector's hologram: its own scan first, then every linked
+     * projector's scan (skipping any that haven't been scanned/synced yet). Each grid carries its own
+     * world scan centre so the bake can stitch them in world space.
+     */
+    private static List<Grid> gatherGrids(LiveMapBlockEntity be, BlockPos center) {
+        List<Grid> grids = new ArrayList<>();
+        LiveMapData own = be.getData();
+        if (!own.isEmpty()) {
+            grids.add(new Grid(own, center.getX(), center.getZ()));
+        }
+        Level level = be.getLevel();
+        if (level != null) {
+            for (BlockPos link : be.getLinks()) {
+                if (level.getBlockEntity(link) instanceof LiveMapBlockEntity slave) {
+                    LiveMapData d = slave.getData();
+                    if (!d.isEmpty()) {
+                        BlockPos sc = slave.getScanCenter();
+                        grids.add(new Grid(d, sc.getX(), sc.getZ()));
+                    }
+                }
+            }
+        }
+        return grids;
+    }
+
+    private static BakedScene bake(List<Grid> grids, BlockAndTintGetter level, BlockPos master) {
+        // All grids share one world cell scale (set by the master's own resolution) so they stitch
+        // seamlessly regardless of each projector's individual scan radius.
+        float cell = MAP_SPAN / grids.get(0).data().width();
+        boolean single = grids.size() == 1;
+        int masterX = master.getX();
+        int masterZ = master.getZ();
+
+        // Lowest filled world Y across every grid anchors the whole diorama at a common base level.
+        int globalMinY = Integer.MAX_VALUE;
+        int opaqueQuads = single ? BASE_QUADS : 0;
+        int waterQuads = 0;
+        for (Grid g : grids) {
+            LiveMapData d = g.data();
+            globalMinY = Math.min(globalMinY, gridMinY(d));
+            opaqueQuads += countFaces(d.width(), d.band(), d.floor(), d.heights(), d.voxels(), false);
+            waterQuads += countFaces(d.width(), d.band(), d.floor(), d.heights(), d.voxels(), true);
+        }
+        if (globalMinY == Integer.MAX_VALUE) {
+            globalMinY = 0;
+        }
+
+        BakedMesh opaque = allocMesh(opaqueQuads);
+        BakedMesh water = allocMesh(waterQuads);
+        Cursor co = opaque.cursor();
+        Cursor cw = water.cursor();
+        for (Grid g : grids) {
+            LiveMapData d = g.data();
+            fillVoxels(co, cw, d.width(), d.band(), d.floor(), cell, globalMinY, d.heights(), d.voxels(),
+                    level, g.centerX(), g.centerZ(), masterX, masterZ);
+        }
+        // The pedestal only makes sense under a single map; a composite floats as a stitched diorama.
+        if (single) {
+            emitBase(co);
+        }
+        return new BakedScene(opaque, water);
+    }
+
+    /** Lowest filled world Y in one grid, or {@link Integer#MAX_VALUE} if it is entirely air. */
+    private static int gridMinY(LiveMapData data) {
         int size = data.width();
         int band = data.band();
         int floor = data.floor();
         int[] heights = data.heights();
         int[] voxels = data.voxels();
-        float cell = MAP_SPAN / size;
-
-        // Lowest filled world Y across the volume anchors the diorama on the base plate.
         int minY = Integer.MAX_VALUE;
         for (int i = 0; i < size * size; i++) {
             int base = i * band;
@@ -298,19 +366,7 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
                 }
             }
         }
-        if (minY == Integer.MAX_VALUE) {
-            minY = 0;
-        }
-
-        int opaqueQuads = countFaces(size, band, floor, heights, voxels, false) + BASE_QUADS;
-        int waterQuads = countFaces(size, band, floor, heights, voxels, true);
-        BakedMesh opaque = allocMesh(opaqueQuads);
-        BakedMesh water = allocMesh(waterQuads);
-        Cursor co = opaque.cursor();
-        Cursor cw = water.cursor();
-        fillVoxels(co, cw, size, band, floor, cell, minY, heights, voxels, level, center);
-        emitBase(co);
-        return new BakedScene(opaque, water);
+        return minY;
     }
 
     private static BakedMesh allocMesh(int quads) {
@@ -444,12 +500,13 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
      * water voxels go to the translucent cursor {@code cw} with the animated water sprite.
      */
     private static void fillVoxels(Cursor co, Cursor cw, int size, int band, int floor, float cell, int minY,
-                                   int[] heights, int[] voxels, BlockAndTintGetter level, BlockPos center) {
+                                   int[] heights, int[] voxels, BlockAndTintGetter level,
+                                   int centerX, int centerZ, int masterCenterX, int masterCenterZ) {
         Map<Integer, BlockTex> texCache = new HashMap<>();
         TextureAtlasSprite solid = solidSprite();
         BlockPos.MutableBlockPos worldPos = new BlockPos.MutableBlockPos();
-        int originX = center.getX() - size / 2;
-        int originZ = center.getZ() - size / 2;
+        int originX = centerX - size / 2;
+        int originZ = centerZ - size / 2;
         float eps = cell * 0.04F;
 
         for (int dz = 0; dz < size; dz++) {
@@ -478,9 +535,9 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
                             ? texCache.computeIfAbsent(id * 6 + Direction.UP.get3DDataValue(),
                                     x -> resolveFace(state, Direction.UP)).sprite() : null;
 
-                    float x0 = (dx - size / 2F) * cell;
+                    float x0 = (originX + dx - masterCenterX) * cell;
                     float x1 = x0 + cell;
-                    float z0 = (dz - size / 2F) * cell;
+                    float z0 = (originZ + dz - masterCenterZ) * cell;
                     float z1 = z0 + cell;
                     float yb = BASE + (wy - minY) * cell;
                     float yt = yb + cell;
@@ -717,19 +774,48 @@ public class LiveMapBlockEntityRenderer implements BlockEntityRenderer<LiveMapBl
         return (argb & 0xFF000000) | (r << 16) | (g << 8) | b; // keep input alpha (water is translucent)
     }
 
-    // Keyed by the IDENTITY of the data snapshot, not its contents: the server only ever hands us a
+    /** One scan feeding a (possibly composite) hologram: the voxel snapshot plus its world scan centre. */
+    private record Grid(LiveMapData data, int centerX, int centerZ) {
+    }
+
+    // Keyed by the IDENTITY of each data snapshot, not its contents: the server only ever hands us a
     // new LiveMapData object when the terrain actually changed (it skips re-syncing equal scans), so
-    // reference equality is enough. Hashing the full voxel array here would run every frame the
+    // reference equality is enough. Hashing the full voxel arrays here would run every frame the
     // hologram is on screen (CACHE.get is per-frame) and is the dominant cost of looking at the map.
-    private record MeshKey(LiveMapData data, long center) {
+    private static final class CompositeKey {
+        private final LiveMapData[] datas;
+        private final long center;
+        private final int hash;
+
+        CompositeKey(List<Grid> grids, long center) {
+            this.datas = new LiveMapData[grids.size()];
+            int h = Long.hashCode(center);
+            for (int i = 0; i < datas.length; i++) {
+                LiveMapData d = grids.get(i).data();
+                datas[i] = d;
+                h = h * 31 + System.identityHashCode(d);
+            }
+            this.center = center;
+            this.hash = h;
+        }
+
         @Override
         public int hashCode() {
-            return System.identityHashCode(data) * 31 + Long.hashCode(center);
+            return hash;
         }
 
         @Override
         public boolean equals(Object obj) {
-            return obj instanceof MeshKey other && other.data == data && other.center == center;
+            if (!(obj instanceof CompositeKey other) || other.center != center
+                    || other.datas.length != datas.length) {
+                return false;
+            }
+            for (int i = 0; i < datas.length; i++) {
+                if (datas[i] != other.datas[i]) { // reference identity: cheap and sufficient
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

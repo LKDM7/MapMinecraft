@@ -28,7 +28,9 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * The block entity behind a live map projector. Server-side it periodically scans the terrain around
@@ -41,9 +43,16 @@ import java.util.Arrays;
 public class LiveMapBlockEntity extends BlockEntity {
 
     private static final String SETTINGS_KEY = "Settings";
+    private static final String LINKS_KEY = "Links";
+
+    /** Maximum projectors that can feed one master's composite hologram (master + this many slaves). */
+    public static final int MAX_LINKS = 8;
 
     private LiveMapData data = LiveMapData.EMPTY;
     private LiveMapSettings settings = LiveMapSettings.DEFAULT;
+    // Positions of other projectors whose scans this one aggregates into a single, larger composite
+    // hologram. Only meaningful on the "master" projector; slaves keep their own (usually hidden) map.
+    private final List<BlockPos> links = new ArrayList<>();
     private int signal; // current redstone radar output (0-15), transient/recomputed
     private long ticks;
     private final int phase;
@@ -79,6 +88,45 @@ public class LiveMapBlockEntity extends BlockEntity {
     /** Current redstone radar output (read by the block's getSignal). */
     public int getSignal() {
         return signal;
+    }
+
+    /** Positions of the projectors this master aggregates (empty for a standalone projector). */
+    public List<BlockPos> getLinks() {
+        return links;
+    }
+
+    /**
+     * Server: toggle a slave projector in this master's composite. Returns true if it was added,
+     * false if it was already linked and got removed. Re-syncs the (tiny) link list to clients.
+     */
+    public boolean toggleLink(BlockPos slave) {
+        boolean added;
+        if (links.remove(slave)) {
+            added = false;
+        } else {
+            if (links.size() >= MAX_LINKS) {
+                return false;
+            }
+            links.add(slave.immutable());
+            added = true;
+        }
+        syncLinks();
+        return added;
+    }
+
+    /** Server: drop all of this projector's links. */
+    public void clearLinks() {
+        if (!links.isEmpty()) {
+            links.clear();
+            syncLinks();
+        }
+    }
+
+    private void syncLinks() {
+        setChanged();
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+        }
     }
 
     /** Server: validate-and-apply new settings, immediately re-scan and sync to clients. */
@@ -271,6 +319,13 @@ public class LiveMapBlockEntity extends BlockEntity {
         super.saveAdditional(tag, provider);
         LiveMapSettings.CODEC.encodeStart(NbtOps.INSTANCE, settings).result()
                 .ifPresent(encoded -> tag.put(SETTINGS_KEY, encoded));
+        if (!links.isEmpty()) {
+            long[] packed = new long[links.size()];
+            for (int i = 0; i < packed.length; i++) {
+                packed[i] = links.get(i).asLong();
+            }
+            tag.putLongArray(LINKS_KEY, packed);
+        }
     }
 
     @Override
@@ -281,6 +336,12 @@ public class LiveMapBlockEntity extends BlockEntity {
                     .orElse(LiveMapSettings.DEFAULT).sanitized();
         } else {
             settings = LiveMapSettings.DEFAULT;
+        }
+        links.clear();
+        if (tag.contains(LINKS_KEY)) {
+            for (long packed : tag.getLongArray(LINKS_KEY)) {
+                links.add(BlockPos.of(packed));
+            }
         }
         data = LiveMapData.EMPTY; // rebuilt by the next server scan, then streamed to clients
     }

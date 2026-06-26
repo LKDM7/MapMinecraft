@@ -19,5 +19,11 @@
   "screen.mapminecraft.target": "Center on coords",
   "screen.mapminecraft.show": "Hologram",
   "screen.mapminecraft.preset": "Preset %s",
-  "screen.mapminecraft.preset.hint": "Presets (click: load, Shift+click: save)"
+  "screen.mapminecraft.preset.hint": "Presets (click: load, Shift+click: save)",
+  "item.mapminecraft.linker": "Live Map Linker",
+  "item.mapminecraft.linker.master": "Master projector set at %s %s %s",
+  "item.mapminecraft.linker.deselected": "Master projector deselected",
+  "item.mapminecraft.linker.linked": "Projector linked (%s total)",
+  "item.mapminecraft.linker.unlinked": "Projector unlinked (%s total)",
+  "item.mapminecraft.linker.cleared": "Projector links cleared"
 }
