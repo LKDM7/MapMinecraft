@@ -34,6 +34,7 @@ public class LiveMapConfigScreen extends Screen {
     private int coordLabelY;
     private int xBoxX;
     private int zBoxX;
+    private int presetLabelY;
 
     public LiveMapConfigScreen(LiveMapBlockEntity be) {
         super(Component.translatable("screen.mapminecraft.live_map"));
@@ -120,8 +121,33 @@ public class LiveMapConfigScreen extends Screen {
         addRenderableWidget(zBox);
         y += GAP + 4;
 
+        // Per-player preset slots: click a slot to load it, Shift+click to save the current settings.
+        presetLabelY = y;
+        y += 10;
+        int slotW = (PANEL_W - (LiveMapPresets.SLOT_COUNT - 1) * 6) / LiveMapPresets.SLOT_COUNT;
+        for (int i = 0; i < LiveMapPresets.SLOT_COUNT; i++) {
+            int slot = i;
+            int sx = x + i * (slotW + 6);
+            Button slotButton = Button.builder(presetLabel(slot), b -> {
+                if (Screen.hasShiftDown()) {
+                    LiveMapPresets.save(slot, working);
+                } else {
+                    set(LiveMapPresets.applyTo(slot, working));
+                }
+                b.setMessage(presetLabel(slot));
+            }).bounds(sx, y, slotW, ROW_H).build();
+            addRenderableWidget(slotButton);
+        }
+        y += GAP;
+
         addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> onClose()).bounds(x, y, PANEL_W, ROW_H).build());
         panelBottom = y + ROW_H + 6;
+    }
+
+    private Component presetLabel(int slot) {
+        String n = String.valueOf(slot + 1);
+        return Component.translatable("screen.mapminecraft.preset", n)
+                .append(LiveMapPresets.isFilled(slot) ? " ●" : " ○");
     }
 
     private SettingSlider slider(int x, int y, String key, float min, float max, float current, boolean integer, DoubleConsumer onChange) {
@@ -198,6 +224,9 @@ public class LiveMapConfigScreen extends Screen {
         // Captions for the target coordinate boxes.
         graphics.drawString(font, "X", xBoxX, coordLabelY, 0xA0A8B4, false);
         graphics.drawString(font, "Z", zBoxX, coordLabelY, 0xA0A8B4, false);
+        // Caption for the preset slots.
+        graphics.drawString(font, Component.translatable("screen.mapminecraft.preset.hint"),
+                PANEL_X, presetLabelY, 0xA0A8B4, false);
     }
 
     @Override

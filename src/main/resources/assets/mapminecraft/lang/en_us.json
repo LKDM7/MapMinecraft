@@ -17,5 +17,7 @@
   "screen.mapminecraft.detect.animals": "Animals",
   "screen.mapminecraft.detect.items": "Items",
   "screen.mapminecraft.target": "Center on coords",
-  "screen.mapminecraft.show": "Hologram"
+  "screen.mapminecraft.show": "Hologram",
+  "screen.mapminecraft.preset": "Preset %s",
+  "screen.mapminecraft.preset.hint": "Presets (click: load, Shift+click: save)"
 }
